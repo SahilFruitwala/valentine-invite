@@ -29,7 +29,7 @@ const App: React.FC = () => {
 
       {/* Footer / Credits */}
       <footer className="absolute bottom-2 w-full text-center text-valentine-800/40 text-xs font-medium z-10 mix-blend-multiply">
-        Made with ❤️ using React
+        Made with ❤️
       </footer>
     </div>
   );
