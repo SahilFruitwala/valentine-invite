@@ -19,6 +19,7 @@ const ValentineScreen: React.FC<ValentineScreenProps> = ({ onSuccess }) => {
     position: "relative",
   });
   const [showFunnyModal, setShowFunnyModal] = useState(false);
+  const [isYesDisabled, setIsYesDisabled] = useState(false);
   const lastPos = useRef({ x: 0, y: 0 });
   const lastInteractionTime = useRef(0);
 
@@ -31,17 +32,27 @@ const ValentineScreen: React.FC<ValentineScreenProps> = ({ onSuccess }) => {
 
     // Try to find a position that is far enough from the last position
     do {
-      // Constrain within 10% to 70% to avoid overflow on mobile/edges
-      // On mobile, width is narrow, so we need to be careful.
-      newX = Math.random() * 60 + 10;
-      newY = Math.random() * 60 + 10;
+      // Constrain within 5% to 80% to keep it on screen
+      newX = Math.random() * 75 + 5;
+      newY = Math.random() * 75 + 5;
 
       const deltaX = newX - lastPos.current.x;
       const deltaY = newY - lastPos.current.y;
       const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
 
-      // Ensure it moves at least 20% of the screen away
-      if (distance > 20 || attempts >= 10) {
+      // Avoid the "Danger Zone" (Center of screen where Yes button usually is)
+      // Yes button is typically around Left 20-80% and Top 40-60%
+      // We define a box in the middle to avoid
+      const inDangerZoneX = newX > 25 && newX < 75;
+      const inDangerZoneY = newY > 40 && newY < 60;
+
+      // Conditions to accept new position:
+      // 1. Must be far enough from last position
+      // 2. AND Should not be in the center danger zone (unless we really can't find a spot)
+      const isFarEnough = distance > 25 || attempts >= 10;
+      const isSafeZone = !inDangerZoneX || !inDangerZoneY || attempts >= 15;
+
+      if (isFarEnough && isSafeZone) {
         break;
       }
       attempts++;
@@ -56,13 +67,26 @@ const ValentineScreen: React.FC<ValentineScreenProps> = ({ onSuccess }) => {
     });
   };
 
-  const handleInteraction = (source: "mouse" | "touch") => {
+  const handleInteraction = (
+    source: "mouse" | "touch",
+    e?: React.SyntheticEvent,
+  ) => {
     if (showFunnyModal) return;
 
-    // Throttle interactions to prevent double-firing (touch + click + mouseenter)
-    // This fixes the issue where one tap counts as 3 attempts
+    // CRITICAL FIX: Disable Yes button briefly to prevent ghost clicks
+    // triggering the Yes button after No moves away
+    setIsYesDisabled(true);
+    setTimeout(() => setIsYesDisabled(false), 800);
+
+    // Prevent default behavior on touch to stop emulated mouse events
+    if (source === "touch" && noCount < MAX_RUN_AWAY_ATTEMPTS) {
+      e?.preventDefault();
+      e?.stopPropagation(); // Also stop propagation
+    }
+
+    // Throttle interactions
     const now = Date.now();
-    if (now - lastInteractionTime.current < 500) return;
+    if (now - lastInteractionTime.current < 400) return;
     lastInteractionTime.current = now;
 
     if (noCount < MAX_RUN_AWAY_ATTEMPTS) {
@@ -72,21 +96,18 @@ const ValentineScreen: React.FC<ValentineScreenProps> = ({ onSuccess }) => {
   };
 
   const handleNoClick = (e: React.MouseEvent) => {
-    e.preventDefault(); // Prevent default behavior
+    e.preventDefault();
+    e.stopPropagation();
     if (showFunnyModal) return;
 
-    // Check time since last interaction to avoid race conditions with touchstart
     const now = Date.now();
-    const isRecent = now - lastInteractionTime.current < 500;
+    const isRecent = now - lastInteractionTime.current < 400;
 
     if (noCount < MAX_RUN_AWAY_ATTEMPTS) {
-      // If we haven't recently moved (throttle check), move now.
       if (!isRecent) {
-        handleInteraction("mouse");
+        handleInteraction("mouse", e);
       }
     } else {
-      // Logic for when we have given up running away
-      // Only allow success if we are truly in the "stopped" state
       setShowFunnyModal(true);
       setTimeout(() => {
         onSuccess();
@@ -96,7 +117,6 @@ const ValentineScreen: React.FC<ValentineScreenProps> = ({ onSuccess }) => {
 
   const yesButtonSize = noCount * 15 + 16;
 
-  // Dynamic image selection based on "No" count
   const getBearImage = () => {
     if (noCount === 0) return IMAGES.Asking;
     if (noCount > 0 && noCount < 3) return IMAGES.Shocked;
@@ -109,7 +129,7 @@ const ValentineScreen: React.FC<ValentineScreenProps> = ({ onSuccess }) => {
   };
 
   return (
-    <div className="relative z-10 flex flex-col items-center justify-center w-full max-w-4xl p-4 text-center min-h-screen h-dvh overflow-hidden">
+    <div className="relative z-10 flex flex-col items-center justify-center w-full max-w-4xl p-4 text-center min-h-screen h-dvh overflow-hidden select-none touch-none">
       {/* Error Modal */}
       <AnimatePresence>
         {showFunnyModal && (
@@ -179,7 +199,7 @@ const ValentineScreen: React.FC<ValentineScreenProps> = ({ onSuccess }) => {
             <img
               src={getBearImage()}
               alt="Cute bear reaction"
-              className="w-72 h-72 md:w-56 md:h-56 object-cover transform transition-transform duration-300"
+              className="w-72 h-72 md:w-56 md:h-56 object-cover transform transition-transform duration-300 pointer-events-none"
             />
             {noCount > 0 && (
               <motion.div
@@ -193,33 +213,25 @@ const ValentineScreen: React.FC<ValentineScreenProps> = ({ onSuccess }) => {
           </div>
         </motion.div>
 
-        <h1 className="text-3xl md:text-5xl font-handwriting text-valentine-600 mb-6 md:mb-8 drop-shadow-sm select-none leading-relaxed px-2">
+        <h1 className="text-3xl md:text-5xl font-handwriting text-valentine-600 mb-6 md:mb-8 drop-shadow-sm select-none leading-relaxed px-2 pointer-events-none">
           Will you be my Valentine?
         </h1>
 
         <div className="flex flex-wrap items-center justify-center gap-4 w-full relative min-h-[140px]">
           <motion.button
             layout
-            className={`bg-gradient-to-br from-green-400 to-green-600 text-white font-bold rounded-full shadow-lg shadow-green-200/50 flex items-center justify-center gap-3 relative overflow-hidden group touch-manipulation`}
+            disabled={isYesDisabled}
+            className={`bg-gradient-to-br from-green-400 to-green-600 text-white font-bold rounded-full shadow-lg shadow-green-200/50 flex items-center justify-center gap-3 relative overflow-hidden group touch-manipulation transition-opacity duration-200 ${isYesDisabled ? "opacity-50 pointer-events-none cursor-not-allowed" : "opacity-100"}`}
             style={{
               // Cap the size growth on mobile
-              fontSize: Math.min(yesButtonSize, 50),
-              padding: `${Math.min(yesButtonSize / 2.5, 25)}px ${Math.min(yesButtonSize, 50)}px`,
+              fontSize: Math.min(yesButtonSize, 35),
+              padding: `${Math.min(yesButtonSize / 2.5, 20)}px ${Math.min(yesButtonSize, 40)}px`,
               zIndex: 30,
             }}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
+            whileHover={!isYesDisabled ? { scale: 1.05 } : {}}
+            whileTap={!isYesDisabled ? { scale: 0.95 } : {}}
             animate={{
-              scale: [1, 1.02, 1],
-              boxShadow: [
-                "0px 10px 15px -3px rgba(74, 222, 128, 0.5)",
-                "0px 10px 25px -3px rgba(74, 222, 128, 0.7)",
-                "0px 10px 15px -3px rgba(74, 222, 128, 0.5)",
-              ],
-            }}
-            transition={{
-              scale: { repeat: Infinity, duration: 1.5 },
-              boxShadow: { repeat: Infinity, duration: 1.5 },
+              scale: isYesDisabled ? 1 : [1, 1.02, 1],
             }}
             onClick={onSuccess}
           >
@@ -231,7 +243,7 @@ const ValentineScreen: React.FC<ValentineScreenProps> = ({ onSuccess }) => {
           </motion.button>
 
           <motion.button
-            className={`bg-white text-valentine-500 hover:bg-valentine-50 border-2 border-valentine-200 font-bold py-3 px-6 rounded-full shadow-sm hover:shadow-md transition-all whitespace-nowrap z-50 touch-manipulation ${showFunnyModal ? "opacity-0 pointer-events-none" : "opacity-100"}`}
+            className={`bg-white text-valentine-500 hover:bg-valentine-50 border-2 border-valentine-200 font-bold py-3 px-6 rounded-full shadow-sm hover:shadow-md transition-all whitespace-nowrap z-50 touch-action-none select-none ${showFunnyModal ? "opacity-0 pointer-events-none" : "opacity-100"}`}
             style={{
               position: noStyle.position,
               top: noStyle.top,
@@ -246,8 +258,8 @@ const ValentineScreen: React.FC<ValentineScreenProps> = ({ onSuccess }) => {
                   }
                 : { rotate: 0 }
             }
-            onMouseEnter={() => handleInteraction("mouse")}
-            onTouchStart={() => handleInteraction("touch")}
+            onMouseEnter={(e) => handleInteraction("mouse", e)}
+            onTouchStart={(e) => handleInteraction("touch", e)}
             onClick={handleNoClick}
           >
             {getNoText()}
